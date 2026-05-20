@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fifth Harvest — Planting Scheduler</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --soil:#1E1208; --bark:#3D2010; --bark2:#5C3218;
+  --moss:#3D5C38; --moss-light:#5A7D54; --leaf:#7AAB6E; --sprout:#B0CF9E;
+  --cream:#F5F0E4; --parchment:#EDE4CC; --amber:#C97D18; --amber-light:#E8A030;
+  --white:#FDFAF3; --text:#1E1208; --text-muted:#7A6040; --border:#D8CEBC;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--text);min-height:100vh;}
+
+/* HEADER */
+.header{background:var(--soil);padding:0 48px;height:68px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid var(--amber);position:sticky;top:0;z-index:100;}
+.brand{display:flex;align-items:center;gap:14px;}
+.brand-icon{font-size:26px;}
+.brand h1{font-family:'DM Serif Display',serif;font-size:20px;color:var(--cream);}
+.brand h1 em{color:var(--amber-light);font-style:normal;}
+.brand-sub{font-family:'DM Mono',monospace;font-size:10px;color:var(--sprout);letter-spacing:.1em;text-transform:uppercase;margin-top:1px;}
+.header-right{display:flex;align-items:center;gap:12px;}
+.week-count-badge{background:var(--moss);color:var(--sprout);padding:5px 14px;border-radius:20px;font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.06em;}
+.btn-nav{background:transparent;border:1px solid #5A3020;color:#B07050;padding:5px 14px;border-radius:20px;font-family:'DM Mono',monospace;font-size:11px;cursor:pointer;letter-spacing:.04em;transition:all .15s;}
+.btn-nav:hover,.btn-nav.active{background:var(--moss);border-color:var(--moss);color:var(--white);}
+.btn-clear-all{background:transparent;border:1px solid #5A3020;color:#B07050;padding:5px 14px;border-radius:20px;font-family:'DM Mono',monospace;font-size:11px;cursor:pointer;letter-spacing:.04em;transition:all .15s;}
+.btn-clear-all:hover{background:#3A1810;color:#E09070;}
+
+/* PAGE LAYOUT */
+.page-wrap{display:none;}
+.page-wrap.active{display:block;}
+.schedule-layout{display:grid;grid-template-columns:320px 1fr;min-height:calc(100vh - 68px);}
+
+/* SIDEBAR */
+.sidebar{background:var(--bark);border-right:2px solid var(--bark2);display:flex;flex-direction:column;padding:28px 24px;gap:24px;position:sticky;top:68px;height:calc(100vh - 68px);overflow-y:auto;}
+.sidebar-section-title{font-family:'DM Mono',monospace;font-size:10px;color:var(--sprout);letter-spacing:.12em;text-transform:uppercase;margin-bottom:10px;}
+.upload-zone{border:2px dashed #6A4828;border-radius:12px;padding:24px 16px;text-align:center;cursor:pointer;transition:all .2s;position:relative;background:#2C1610;}
+.upload-zone:hover,.upload-zone.drag-over{border-color:var(--leaf);background:#2E1E10;}
+.upload-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+.upload-zone .icon{font-size:28px;margin-bottom:8px;}
+.upload-zone .title{font-size:13px;color:var(--cream);font-weight:500;margin-bottom:4px;}
+.upload-zone .hint{font-size:11px;color:#906848;font-family:'DM Mono',monospace;}
+.weeks-list{display:flex;flex-direction:column;gap:6px;}
+.week-item{background:#2A1810;border:1px solid #4A2C18;border-radius:8px;padding:10px 12px;display:flex;align-items:center;justify-content:space-between;animation:slideIn .2s ease;}
+@keyframes slideIn{from{opacity:0;transform:translateX(-8px);}to{opacity:1;transform:translateX(0);}}
+.week-item-date{font-family:'DM Mono',monospace;font-size:11px;color:var(--sprout);}
+.week-item-rows{font-size:11px;color:#8A6040;margin-top:2px;}
+.week-item-remove{background:none;border:none;color:#6A4030;cursor:pointer;font-size:16px;line-height:1;padding:2px 4px;transition:color .15s;}
+.week-item-remove:hover{color:#E08060;}
+.no-weeks{font-size:12px;color:#6A4828;font-family:'DM Mono',monospace;text-align:center;padding:16px 0;}
+.control-group{display:flex;flex-direction:column;gap:8px;}
+.date-input{background:#2A1810;border:1px solid #5A3818;border-radius:8px;padding:10px 12px;font-family:'DM Mono',monospace;font-size:13px;color:var(--cream);outline:none;width:100%;color-scheme:dark;}
+.date-input:focus{border-color:var(--leaf);}
+.window-select{background:#2A1810;border:1px solid #5A3818;border-radius:8px;padding:10px 12px;font-family:'DM Mono',monospace;font-size:13px;color:var(--cream);outline:none;width:100%;cursor:pointer;color-scheme:dark;}
+.btn-generate{background:var(--moss);color:var(--white);border:none;padding:14px 20px;border-radius:10px;font-family:'DM Sans',sans-serif;font-weight:600;font-size:14px;cursor:pointer;transition:all .18s;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;}
+.btn-generate:hover{background:var(--moss-light);}
+.btn-generate:disabled{background:#3A2818;color:#6A5030;cursor:not-allowed;}
+
+/* MAIN */
+.main{padding:36px 40px;overflow-y:auto;}
+.empty-state{text-align:center;padding:80px 20px;color:var(--text-muted);}
+.empty-state .big{font-size:56px;margin-bottom:20px;}
+.empty-state h2{font-family:'DM Serif Display',serif;font-size:28px;color:var(--bark);margin-bottom:10px;}
+.empty-state p{font-size:14px;line-height:1.7;max-width:380px;margin:0 auto;}
+.steps{display:flex;flex-direction:column;gap:10px;max-width:340px;margin:28px auto 0;text-align:left;}
+.step{display:flex;align-items:flex-start;gap:12px;background:var(--white);border:1px solid var(--border);border-radius:10px;padding:12px 16px;}
+.step-num{background:var(--moss);color:var(--white);width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0;margin-top:1px;}
+.step-text{font-size:13px;line-height:1.5;color:var(--text-muted);}
+
+/* SUMMARY BAR */
+.summary-bar{background:var(--soil);border-radius:14px;padding:22px 28px;display:flex;margin-bottom:32px;border:1px solid #3A2010;}
+.stat{flex:1;padding:0 24px;border-right:1px solid #3A2010;}
+.stat:first-child{padding-left:0;}
+.stat:last-child{border-right:none;}
+.stat-val{font-family:'DM Serif Display',serif;font-size:30px;color:var(--amber-light);}
+.stat-lbl{font-family:'DM Mono',monospace;font-size:10px;color:var(--sprout);letter-spacing:.09em;text-transform:uppercase;margin-top:2px;}
+
+/* WEEK CARDS */
+.results-header{display:flex;align-items:baseline;gap:14px;margin-bottom:24px;}
+.results-header h2{font-family:'DM Serif Display',serif;font-size:24px;color:var(--soil);}
+.results-sub{font-size:12px;color:var(--text-muted);font-family:'DM Mono',monospace;}
+.schedule-grid{display:flex;flex-direction:column;gap:18px;}
+.week-card{background:var(--white);border:1.5px solid var(--border);border-radius:14px;overflow:hidden;animation:fadeUp .3s ease forwards;opacity:0;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+.week-card:nth-child(1){animation-delay:.04s}.week-card:nth-child(2){animation-delay:.08s}
+.week-card:nth-child(3){animation-delay:.12s}.week-card:nth-child(4){animation-delay:.16s}
+.week-card:nth-child(5){animation-delay:.20s}.week-card:nth-child(6){animation-delay:.24s}
+.week-card:nth-child(7){animation-delay:.28s}.week-card:nth-child(8){animation-delay:.32s}
+.week-card:nth-child(9){animation-delay:.36s}
+.card-header{background:var(--soil);padding:14px 22px;display:flex;align-items:center;justify-content:space-between;}
+.card-header-left .label{font-family:'DM Mono',monospace;font-size:10px;color:var(--sprout);letter-spacing:.1em;text-transform:uppercase;}
+.card-header-left .date{font-family:'DM Serif Display',serif;font-size:17px;color:var(--cream);margin-top:1px;}
+.this-week-badge{background:var(--amber);color:var(--soil);padding:3px 12px;border-radius:20px;font-family:'DM Mono',monospace;font-size:10px;font-weight:500;letter-spacing:.04em;margin-left:10px;}
+.card-total{background:var(--moss);color:var(--sprout);padding:5px 16px;border-radius:20px;font-family:'DM Mono',monospace;font-size:12px;}
+table.crops{width:100%;border-collapse:collapse;}
+table.crops thead th{background:var(--parchment);padding:9px 22px;text-align:left;font-family:'DM Mono',monospace;font-size:10px;color:var(--text-muted);letter-spacing:.07em;text-transform:uppercase;font-weight:500;}
+table.crops thead th:last-child{text-align:right;}
+table.crops tbody td{padding:12px 22px;border-bottom:1px solid var(--border);vertical-align:middle;font-size:13px;}
+table.crops tbody tr:last-child td{border-bottom:none;}
+table.crops tbody tr:hover td{background:#FAFAF5;}
+.crop-name{font-weight:600;color:var(--bark);font-size:14px;}
+.crop-detail{font-family:'DM Mono',monospace;font-size:10px;color:var(--text-muted);margin-top:3px;}
+.tag{display:inline-block;padding:2px 9px;border-radius:10px;font-family:'DM Mono',monospace;font-size:10px;font-weight:500;}
+.tag-harvest{background:#E8F5E0;color:var(--moss);}
+.tag-container{background:var(--parchment);color:var(--text-muted);}
+.tray-num{font-family:'DM Mono',monospace;font-size:20px;font-weight:500;color:var(--moss);text-align:right;}
+.tray-sub{font-family:'DM Mono',monospace;font-size:10px;color:var(--text-muted);text-align:right;margin-top:2px;}
+.ct-jiffy{background:#E8F5E0;color:#2D5A20;border-left:4px solid #5A9A40;}
+.ct-plastic{background:#E8F0FB;color:#1A3A7A;border-left:4px solid #4A70D0;}
+.ct-open{background:#FDF5E0;color:#7A5A10;border-left:4px solid #D0A030;}
+.container-group-header{padding:10px 22px 6px;font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-weight:600;}
+.ct-jiffy-header{background:#F0FAE8;color:#3A7A28;border-left:4px solid #5A9A40;}
+.ct-plastic-header{background:#EEF3FC;color:#2A4A8A;border-left:4px solid #4A70D0;}
+.ct-open-header{background:#FEFAE8;color:#8A6A18;border-left:4px solid #D0A030;}
+.tray-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:28px;}
+.tray-summary-card{border-radius:10px;padding:16px 20px;text-align:center;}
+.tray-summary-card .ts-num{font-family:'DM Serif Display',serif;font-size:32px;}
+.tray-summary-card .ts-lbl{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-top:4px;}
+.ts-jiffy{background:#E8F5E0;color:#2D5A20;}
+.ts-plastic{background:#E8F0FB;color:#1A3A7A;}
+.ts-open{background:#FDF5E0;color:#7A5A10;}
+.download-bar{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap;}
+.btn-download{display:flex;align-items:center;gap:8px;padding:10px 20px;border-radius:10px;border:none;font-family:'DM Sans',sans-serif;font-weight:600;font-size:13px;cursor:pointer;transition:all .18s;}
+.btn-pdf{background:#C04040;color:#fff;}
+.btn-pdf:hover{background:#A03030;}
+.btn-excel{background:#217346;color:#fff;}
+.btn-excel:hover{background:#185A38;}
+.sourced-card{background:var(--white);border:1.5px solid var(--border);border-radius:14px;padding:22px 28px;margin-top:28px;}
+.sourced-card h3{font-family:'DM Serif Display',serif;font-size:18px;color:var(--bark);margin-bottom:16px;}
+table.sourced{width:100%;border-collapse:collapse;font-size:13px;}
+table.sourced th{padding:8px 12px;text-align:left;font-family:'DM Mono',monospace;font-size:10px;color:var(--text-muted);letter-spacing:.07em;text-transform:uppercase;border-bottom:1px solid var(--border);}
+table.sourced td{padding:10px 12px;border-bottom:1px solid #F0EAD8;color:var(--text-muted);}
+table.sourced tr:last-child td{border-bottom:none;}
+
+/* BANNER */
+.banner{padding:10px 16px;border-radius:8px;font-size:12px;display:none;font-family:'DM Mono',monospace;}
+.banner.error{background:#3A1010;color:#F5A0A0;border:1px solid #6A2020;display:block;}
+.banner.info{background:#1A3010;color:#90C880;border:1px solid #2A5020;display:block;}
+
+/* SETTINGS PAGE */
+.settings-wrap{padding:40px 48px;max-width:980px;}
+.settings-title{font-family:'DM Serif Display',serif;font-size:28px;color:var(--soil);margin-bottom:6px;}
+.settings-sub{font-size:13px;color:var(--text-muted);margin-bottom:24px;font-family:'DM Mono',monospace;}
+.tabs{display:flex;gap:4px;margin-bottom:28px;border-bottom:2px solid var(--border);}
+.tab-btn{background:none;border:none;padding:10px 22px;font-family:'DM Sans',sans-serif;font-size:14px;font-weight:500;color:var(--text-muted);cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;transition:all .15s;}
+.tab-btn:hover{color:var(--bark);}
+.tab-btn.active{color:var(--moss);border-bottom-color:var(--moss);font-weight:600;}
+.tab-panel{display:none;}
+.tab-panel.active{display:block;}
+
+/* CROP SETTINGS ROWS */
+.crop-settings-grid{display:flex;flex-direction:column;gap:10px;margin-bottom:20px;}
+.crop-setting-row{background:var(--white);border:1.5px solid var(--border);border-radius:12px;padding:14px 18px;display:grid;grid-template-columns:1fr 160px 130px;align-items:center;gap:16px;transition:border-color .15s;}
+.crop-setting-row:hover{border-color:var(--leaf);}
+.crop-setting-row.disabled{opacity:0.5;}
+.cs-name{font-weight:600;color:var(--bark);font-size:14px;}
+.cs-meta{font-family:'DM Mono',monospace;font-size:10px;color:var(--text-muted);margin-top:2px;}
+.cs-mode select{background:var(--parchment);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-family:'DM Mono',monospace;font-size:11px;color:var(--text);outline:none;width:100%;cursor:pointer;}
+.cs-trays{display:flex;align-items:center;gap:8px;}
+.cs-trays input{background:var(--parchment);border:1.5px solid var(--border);border-radius:8px;padding:7px 10px;font-family:'DM Mono',monospace;font-size:13px;font-weight:600;color:var(--text);outline:none;width:70px;text-align:center;transition:border-color .15s;}
+.cs-trays input:focus{border-color:var(--moss);}
+.cs-trays input:disabled{opacity:0.4;cursor:not-allowed;}
+.cs-trays-label{font-family:'DM Mono',monospace;font-size:11px;color:var(--text-muted);}
+.btn-save{background:var(--moss);color:var(--white);border:none;padding:13px 32px;border-radius:10px;font-family:'DM Sans',sans-serif;font-weight:600;font-size:14px;cursor:pointer;transition:all .18s;}
+.btn-save:hover{background:var(--moss-light);}
+.save-confirm{display:none;font-family:'DM Mono',monospace;font-size:12px;color:var(--moss);margin-left:14px;}
+
+/* ADMIN TABLES */
+.section-heading{font-family:'DM Mono',monospace;font-size:11px;color:var(--text-muted);letter-spacing:.1em;text-transform:uppercase;padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:16px;margin-top:28px;}
+.section-heading:first-child{margin-top:0;}
+.admin-table-wrap{background:var(--white);border:1.5px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:8px;}
+.admin-table-wrap table{width:100%;border-collapse:collapse;}
+.admin-table-wrap th{background:var(--parchment);padding:10px 16px;text-align:left;font-family:'DM Mono',monospace;font-size:10px;color:var(--text-muted);letter-spacing:.07em;text-transform:uppercase;}
+.admin-table-wrap td{padding:10px 16px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle;}
+.admin-table-wrap tr:last-child td{border-bottom:none;}
+.admin-table-wrap tr:hover td{background:#FAFAF5;}
+.btn-del{background:none;border:1px solid #D0A0A0;color:#B04040;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;font-family:'DM Mono',monospace;transition:all .15s;}
+.btn-del:hover{background:#F5E0E0;}
+
+/* ADD FORMS */
+.add-form{background:var(--white);border:1.5px solid var(--border);border-radius:14px;padding:24px 28px;}
+.form-grid{display:grid;gap:14px;margin-bottom:16px;}
+.fg-3{grid-template-columns:1fr 1fr 1fr;}
+.fg-2{grid-template-columns:1fr 1fr;}
+.form-field{display:flex;flex-direction:column;gap:5px;}
+.form-field label{font-family:'DM Mono',monospace;font-size:10px;color:var(--text-muted);letter-spacing:.08em;text-transform:uppercase;}
+.form-field input,.form-field select{background:var(--parchment);border:1.5px solid var(--border);border-radius:8px;padding:9px 12px;font-family:'DM Mono',monospace;font-size:13px;color:var(--text);outline:none;transition:border-color .15s;width:100%;}
+.form-field input:focus,.form-field select:focus{border-color:var(--moss);}
+.btn-add{background:var(--amber);color:var(--white);border:none;padding:11px 24px;border-radius:10px;font-family:'DM Sans',sans-serif;font-weight:600;font-size:13px;cursor:pointer;transition:all .18s;}
+.btn-add:hover{background:var(--amber-light);}
+.form-error{font-family:'DM Mono',monospace;font-size:11px;color:#C04040;margin-top:8px;display:none;}
+
+@media(max-width:900px){
+  .schedule-layout{grid-template-columns:1fr;}
+  .sidebar{position:static;height:auto;}
+  .main{padding:24px 20px;}
+  .header{padding:0 20px;}
+  .settings-wrap{padding:24px 20px;}
+  .fg-3{grid-template-columns:1fr 1fr;}
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="brand">
+    <div class="brand-icon">🌱</div>
+    <div>
+      <h1><em>Fifth Harvest</em> Planting Scheduler</h1>
+      <div class="brand-sub">Automated Growing Plan</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="week-count-badge" id="weekCountBadge">Loading…</div>
+    <button class="btn-nav active" id="btnSchedule" onclick="showPage('schedule')">🌿 Schedule</button>
+    <button class="btn-nav" id="btnSettings" onclick="showPage('settings')">⚙️ Settings</button>
+    <button class="btn-clear-all" onclick="clearAllData()">Clear Data</button>
+  </div>
+</div>
+
+<!-- ── SCHEDULE PAGE ── -->
+<div class="page-wrap active" id="schedulePage">
+  <div class="schedule-layout">
+    <aside class="sidebar">
+      <div>
+        <div class="sidebar-section-title">Add New Week</div>
+        <div class="upload-zone" id="uploadZone">
+          <input type="file" id="fileInput" multiple accept=".csv"/>
+          <div class="icon">📂</div>
+          <div class="title">Drop weekly CSV here</div>
+          <div class="hint">Saved to shared database automatically</div>
+        </div>
+        <div class="banner" id="banner" style="margin-top:10px;"></div>
+      </div>
+      <div>
+        <div class="sidebar-section-title">Stored Weeks</div>
+        <div class="weeks-list" id="weeksList"><div class="no-weeks">Loading…</div></div>
+      </div>
+      <div class="control-group">
+        <div class="sidebar-section-title">Rolling Window</div>
+        <select class="window-select" id="windowSelect">
+          <option value="0">All stored weeks</option>
+          <option value="4">Last 4 weeks</option>
+          <option value="6" selected>Last 6 weeks</option>
+          <option value="8">Last 8 weeks</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <div class="sidebar-section-title">Next Planting Saturday</div>
+        <input type="date" class="date-input" id="plantingDate"/>
+      </div>
+      <button class="btn-generate" id="generateBtn" onclick="generate()" disabled>🌿 Generate Schedule</button>
+    </aside>
+    <main class="main" id="main">
+      <div class="empty-state">
+        <div class="big">🌾</div>
+        <h2>Ready to plan your grow</h2>
+        <p>Upload your weekly sales CSVs — they're saved to the shared database for all staff automatically.</p>
+        <div class="steps">
+          <div class="step"><div class="step-num">1</div><div class="step-text">Upload weekly sales CSVs — stored automatically for all staff</div></div>
+          <div class="step"><div class="step-num">2</div><div class="step-text">Each new week, drop in that week's CSV</div></div>
+          <div class="step"><div class="step-num">3</div><div class="step-text">Pick the rolling window and next Saturday</div></div>
+          <div class="step"><div class="step-num">4</div><div class="step-text">Hit Generate — get your full planting schedule</div></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ── SETTINGS PAGE ── -->
+<div class="page-wrap" id="settingsPage">
+  <div class="settings-wrap">
+    <div class="settings-title">Settings</div>
+    <div class="settings-sub">Manage schedule settings, crop reference data, and product mappings. All changes sync instantly for all staff.</div>
+    <div class="tabs">
+      <button class="tab-btn active" onclick="showTab('tabSchedule',this)">📋 Schedule</button>
+      <button class="tab-btn" onclick="showTab('tabCrops',this)">🌿 Crop Reference</button>
+      <button class="tab-btn" onclick="showTab('tabProducts',this)">📦 Product Mappings</button>
+    </div>
+
+    <!-- TAB: Schedule settings -->
+    <div class="tab-panel active" id="tabSchedule">
+      <div id="settingsCropList" class="crop-settings-grid"></div>
+      <div style="display:flex;align-items:center;margin-top:8px;">
+        <button class="btn-save" onclick="confirmSave()">💾 Settings Auto-Saved</button>
+        <span class="save-confirm" id="saveConfirm">✓ Saved!</span>
+      </div>
+    </div>
+
+    <!-- TAB: Crop reference -->
+    <div class="tab-panel" id="tabCrops">
+      <div class="section-heading">Current Crops</div>
+      <div class="admin-table-wrap">
+        <table>
+          <thead><tr><th>Crop</th><th>Unit</th><th>Per Tray</th><th>Weeks</th><th>Container</th><th></th></tr></thead>
+          <tbody id="cropsTableBody"><tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted)">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="section-heading">Add New Crop</div>
+      <div class="add-form">
+        <div class="form-grid fg-3">
+          <div class="form-field"><label>Crop Name</label><input type="text" id="nc_name" placeholder="e.g. Sorrel"></div>
+          <div class="form-field"><label>Maturity (weeks)</label><input type="number" id="nc_weeks" min="1" max="52" placeholder="e.g. 4"></div>
+          <div class="form-field"><label>Yield per Tray</label><input type="number" id="nc_yield" min="0.001" step="0.001" placeholder="e.g. 0.25"></div>
+        </div>
+        <div class="form-grid fg-3">
+          <div class="form-field"><label>Unit Type</label>
+            <select id="nc_unit"><option value="kg">kg</option><option value="Bunch">Bunch</option><option value="Head">Head</option><option value="g">g (grams)</option></select>
+          </div>
+          <div class="form-field"><label>Container</label>
+            <select id="nc_container"><option value="Open tray">Open tray</option><option value="Jiffy cup">Jiffy cup</option><option value="Plastic cup">Plastic cup</option></select>
+          </div>
+          <div class="form-field"><label>&nbsp;</label>
+            <button class="btn-add" onclick="addCrop()" style="margin-top:2px;">+ Add Crop</button>
+          </div>
+        </div>
+        <div class="form-error" id="cropError"></div>
+      </div>
+    </div>
+
+    <!-- TAB: Product mappings -->
+    <div class="tab-panel" id="tabProducts">
+      <div class="section-heading">Current Product Mappings</div>
+      <div class="admin-table-wrap">
+        <table>
+          <thead><tr><th>Product Name (from CSV)</th><th>Crop</th><th>Qty per Unit Sold</th><th></th></tr></thead>
+          <tbody id="productMapBody"><tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text-muted)">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="section-heading">Add New Mapping</div>
+      <div class="add-form">
+        <div class="form-grid fg-3">
+          <div class="form-field"><label>Product Name (exact, from CSV)</label><input type="text" id="pm_product" placeholder="e.g. Basil Bunch"></div>
+          <div class="form-field"><label>Crop</label><select id="pm_crop"></select></div>
+          <div class="form-field"><label>Qty per Unit Sold</label><input type="number" id="pm_qty" min="0.0001" step="0.0001" placeholder="e.g. 1 or 0.05"></div>
+        </div>
+        <button class="btn-add" onclick="addProductMapping()">+ Add Mapping</button>
+        <div class="form-error" id="pmError"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const SB_URL = "https://cthkliaabqjrpwwtxmlu.supabase.co";
+const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN0aGtsaWFhYnFqcnB3d3R4bWx1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyNjI0ODcsImV4cCI6MjA5NDgzODQ4N30.UcnFqEQqEfNAd8Gv2mSdMSG9N5A8bjwoi986agF2soA";
+
+// ─── RUNTIME STATE ────────────────────────────────────────────────────────────
+let PRODUCE = [];  // loaded from crops table
+let PM      = {};  // crop name → crop object
+let PMAP    = {};  // product name → { cropName: qtyPerUnit }
+
+// Sourced ingredients — hardcoded, rarely changes
+const SOURCED = {
+  "Retail - Premium Rocket Mix Punnet": {"Market Wild Rocket":"300g sourced per punnet"},
+  "Retail - Wild Rocket Punnet":        {"Market Wild Rocket":"300g sourced per punnet"},
+  "FH Blended Mix Salad Kg":            {"Market Salad Mix":"0.75kg per 1kg blend"},
+};
+
+// ─── SUPABASE HELPER ──────────────────────────────────────────────────────────
+async function sbFetch(path, method='GET', body=null) {
+  const opts = {
+    method,
+    headers: {
+      'apikey': SB_KEY,
+      'Authorization': 'Bearer ' + SB_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': method==='POST' ? 'resolution=merge-duplicates' : '',
+    }
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(SB_URL + '/rest/v1/' + path, opts);
+  if (!res.ok) { const err = await res.text(); throw new Error(err); }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+// ─── DATA LOADERS ─────────────────────────────────────────────────────────────
+async function loadCrops() {
+  const rows = await sbFetch('crops?order=crop.asc');
+  PRODUCE = rows || [];
+  PM = {};
+  PRODUCE.forEach(p => {
+    PM[p.crop] = { crop:p.crop, qtyType:p.qty_type, perTray:parseFloat(p.per_tray), weeks:parseInt(p.weeks), container:p.container };
+  });
+}
+
+async function loadProductMap() {
+  const rows = await sbFetch('product_map?order=product_name.asc');
+  PMAP = {};
+  (rows||[]).forEach(r => {
+    if (!PMAP[r.product_name]) PMAP[r.product_name] = {};
+    PMAP[r.product_name][r.crop_name] = parseFloat(r.qty_per_unit);
+  });
+}
+
+async function loadStored() {
+  try { return (await sbFetch('weeks?order=id.asc')) || []; }
+  catch(e) { return []; }
+}
+
+async function saveManyWeeks(weeks) {
+  const payload = weeks.map(w => ({ id:w.key, label:w.label, rows:w.rows, added_at:w.addedAt }));
+  await sbFetch('weeks', 'POST', payload);
+}
+
+async function deleteWeek(key) {
+  await sbFetch('weeks?id=eq.' + encodeURIComponent(key), 'DELETE');
+}
+
+async function loadSettingsFromDB() {
+  try {
+    const rows = await sbFetch('settings');
+    const result = {};
+    (rows||[]).forEach(r => { result[r.crop] = { mode:r.mode, trays:parseInt(r.trays) }; });
+    return result;
+  } catch(e) { return {}; }
+}
+
+async function saveSettingToDB(crop, mode, trays) {
+  await sbFetch('settings', 'POST', [{ crop, mode, trays:parseInt(trays)||1 }]);
+}
+
+// ─── INIT ─────────────────────────────────────────────────────────────────────
+window.addEventListener('load', async () => {
+  const d = new Date();
+  const daysToSat = (6 - d.getDay() + 7) % 7 || 7;
+  d.setDate(d.getDate() + daysToSat);
+  document.getElementById('plantingDate').value = d.toISOString().split('T')[0];
+
+  const zone = document.getElementById('uploadZone');
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag-over'); handleFiles(e.dataTransfer.files); });
+  document.getElementById('fileInput').addEventListener('change', e => handleFiles(e.target.files));
+
+  showBanner('info', '⌛ Connecting to database…');
+  try {
+    await Promise.all([loadCrops(), loadProductMap()]);
+    await renderSidebar();
+    hideBanner();
+  } catch(e) {
+    showBanner('error', '⚠️ Could not connect to database. Check your internet connection.');
+  }
+});
+
+// ─── FILE UPLOAD ──────────────────────────────────────────────────────────────
+async function handleFiles(files) {
+  const tasks = Array.from(files).filter(f => f.name.endsWith('.csv'));
+  if (!tasks.length) { showBanner('error','No CSV files found.'); return; }
+  showBanner('info', `⏳ Reading ${tasks.length} file(s)…`);
+
+  const parsed = await Promise.all(tasks.map(file => new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const rows = parseCSV(e.target.result);
+      const match = file.name.match(/(\d{4}-\d{2}-\d{2})_to_(\d{4}-\d{2}-\d{2})/);
+      const label = match ? `${match[1]} → ${match[2]}` : file.name.replace('.csv','').substring(0,35);
+      const key   = match ? `${match[1]}_${match[2]}` : file.name;
+      resolve({ key, label, rows, addedAt: Date.now() });
+    };
+    reader.readAsText(file);
+  })));
+
+  showBanner('info', '⏳ Saving to shared database…');
+  const existing = await loadStored();
+  const existingKeys = new Set(existing.map(w => w.id));
+  let added = 0, skipped = 0;
+  const toSave = parsed.filter(w => { if (existingKeys.has(w.key)) { skipped++; return false; } added++; return true; });
+  if (toSave.length > 0) await saveManyWeeks(toSave);
+  await renderSidebar();
+  document.getElementById('fileInput').value = '';
+  const total = (await loadStored()).length;
+  if (added > 0 && skipped === 0) showBanner('info', `✓ ${added} week(s) saved — ${total} total`);
+  else if (added > 0) showBanner('info', `✓ ${added} new, ${skipped} already stored`);
+  else showBanner('error', `${skipped} week(s) already stored — no duplicates added`);
+}
+
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  if (!lines.length) return [];
+  const headers = splitLine(lines[0]).map(h => h.trim().replace(/^"|"$/g,''));
+  const pi = headers.findIndex(h => h.toLowerCase().includes('product'));
+  const qi = headers.findIndex(h => /^quantity/i.test(h) || h.toLowerCase()==='qty');
+  if (pi===-1 || qi===-1) return [];
+  return lines.slice(1).map(l => {
+    const c = splitLine(l);
+    const prod = (c[pi]||'').trim().replace(/^"|"$/g,'');
+    const qty  = parseFloat((c[qi]||'0').replace(/[^0-9.-]/g,'')) || 0;
+    return { Product:prod, Quantity:qty };
+  }).filter(r => r.Product && r.Quantity > 0);
+}
+
+function splitLine(line) {
+  const r=[]; let cur=''; let q=false;
+  for(let i=0;i<line.length;i++){
+    if(line[i]==='"'){q=!q;}
+    else if(line[i]===','&&!q){r.push(cur);cur='';}
+    else{cur+=line[i];}
+  }
+  r.push(cur); return r;
+}
+
+// ─── SIDEBAR ──────────────────────────────────────────────────────────────────
+async function renderSidebar() {
+  const stored = await loadStored();
+  document.getElementById('weekCountBadge').textContent = `${stored.length} week${stored.length===1?'':'s'} stored`;
+  document.getElementById('generateBtn').disabled = stored.length === 0;
+  const list = document.getElementById('weeksList');
+  if (!stored.length) { list.innerHTML = '<div class="no-weeks">No weeks stored yet</div>'; return; }
+  list.innerHTML = stored.map(w => `
+    <div class="week-item">
+      <div>
+        <div class="week-item-date">${w.label}</div>
+        <div class="week-item-rows">${(w.rows||[]).length} products</div>
+      </div>
+      <button class="week-item-remove" onclick="removeWeek('${w.id}')" title="Remove">✕</button>
+    </div>`).join('');
+}
+
+async function removeWeek(key) {
+  await deleteWeek(key);
+  await renderSidebar();
+  const stored = await loadStored();
+  showBanner('info', `Week removed — ${stored.length} remaining`);
+  if (!stored.length) document.getElementById('main').innerHTML = `<div class="empty-state"><div class="big">🌾</div><h2>No data yet</h2><p>Upload your first weekly CSV to get started.</p></div>`;
+}
+
+async function clearAllData() {
+  if (!confirm('Clear ALL stored weeks for all staff? This cannot be undone.')) return;
+  const stored = await loadStored();
+  for (const w of stored) await deleteWeek(w.id);
+  await renderSidebar();
+  document.getElementById('main').innerHTML = `<div class="empty-state"><div class="big">🌾</div><h2>All data cleared</h2><p>Upload your weekly CSVs to start fresh.</p></div>`;
+  hideBanner();
+}
+
+// ─── GENERATE ─────────────────────────────────────────────────────────────────
+async function generate() {
+  hideBanner();
+  showBanner('info', '⏳ Loading data…');
+  const stored = await loadStored();
+  hideBanner();
+  if (!stored.length) { showBanner('error','No data stored.'); return; }
+
+  const plantStr = document.getElementById('plantingDate').value;
+  if (!plantStr) { showBanner('error','Pick a planting Saturday.'); return; }
+  const plantDate = new Date(plantStr + 'T00:00:00');
+  if (plantDate.getDay() !== 6) { showBanner('error','Please pick a Saturday.'); return; }
+
+  const windowVal = parseInt(document.getElementById('windowSelect').value);
+  const weeksToUse = windowVal > 0 ? stored.slice(-windowVal) : stored;
+  const numWeeks = weeksToUse.length;
+
+  const weeklyData = {};
+  weeksToUse.forEach(w => {
+    (w.rows||[]).forEach(r => {
+      if (!weeklyData[r.Product]) weeklyData[r.Product] = [];
+      weeklyData[r.Product].push(r.Quantity);
+    });
+  });
+
+  function linearRegression(values) {
+    const n = values.length;
+    if (n===0) return 0;
+    if (n===1) return values[0];
+    const avg = values.reduce((a,b)=>a+b,0)/n;
+    const cap = 1.3 * Math.max(...values);
+    if (n<4) return Math.min(avg, cap);
+    const xMean=(n-1)/2, yMean=avg;
+    let num=0, den=0;
+    values.forEach((y,x) => { num+=(x-xMean)*(y-yMean); den+=(x-xMean)**2; });
+    const slope = den!==0 ? num/den : 0;
+    const predicted = (yMean - slope*xMean) + slope*n;
+    return Math.max(0, Math.min(predicted, cap));
+  }
+
+  const avgPerWeek = {};
+  Object.entries(weeklyData).forEach(([p,vals]) => { avgPerWeek[p] = linearRegression(vals); });
+
+  const cropDemand = {}, sourcedDemand = {};
+  Object.entries(avgPerWeek).forEach(([prod, avg]) => {
+    if (PMAP[prod]) Object.entries(PMAP[prod]).forEach(([crop,req]) => { cropDemand[crop]=(cropDemand[crop]||0)+avg*req; });
+    if (SOURCED[prod]) Object.entries(SOURCED[prod]).forEach(([item,note]) => {
+      if (!sourcedDemand[item]) sourcedDemand[item]={qty:0,note};
+      sourcedDemand[item].qty+=avg;
+    });
+  });
+
+  const settings = await loadSettingsFromDB();
+
+  const schedule = [];
+  for (let i=0; i<9; i++) {
+    const sat = new Date(plantDate);
+    sat.setDate(sat.getDate() + i*7);
+    const crops = [];
+
+    Object.entries(cropDemand).forEach(([cropName, weekDemand]) => {
+      const p = PM[cropName];
+      if (!p || weekDemand<=0) return;
+      const s = settings[cropName] || {mode:'auto', trays:1};
+      if (s.mode==='off') return;
+      const rawTrays = weekDemand / p.perTray;
+      const trays = s.mode==='fixed' ? s.trays : Math.ceil(rawTrays*1.30);
+      const harvestDate = new Date(sat);
+      harvestDate.setDate(harvestDate.getDate() + p.weeks*7);
+      crops.push({ cropName, trays, rawTrays, weekDemand, harvestDate, p, trayLabel:s.mode==='fixed'?'fixed':'auto' });
+    });
+
+    // Add fixed/manual crops not in sales
+    Object.entries(settings).forEach(([cropName, s]) => {
+      if (s.mode==='off') return;
+      if (crops.find(c=>c.cropName===cropName)) return;
+      const p = PM[cropName];
+      if (!p) return;
+      const harvestDate = new Date(sat);
+      harvestDate.setDate(harvestDate.getDate() + p.weeks*7);
+      crops.push({ cropName, trays:s.trays, rawTrays:s.trays, weekDemand:0, harvestDate, p, trayLabel:s.mode==='fixed'?'fixed':'manual' });
+    });
+
+    crops.sort((a,b)=>b.trays-a.trays);
+    schedule.push({ date:sat, crops });
+  }
+
+  renderSchedule(schedule, numWeeks, windowVal, sourcedDemand, plantDate);
+}
+
+// ─── RENDER SCHEDULE ──────────────────────────────────────────────────────────
+function ctClass(c){ return c==='Jiffy cup'?'jiffy':c==='Plastic cup'?'plastic':'open'; }
+
+function renderSchedule(schedule, numWeeks, windowVal, sourcedDemand, plantDate) {
+  const firstWeek = schedule[0].crops;
+  const totalTrays   = firstWeek.reduce((a,b)=>a+b.trays,0);
+  const jiffyTrays   = firstWeek.filter(c=>c.p.container==='Jiffy cup').reduce((a,b)=>a+b.trays,0);
+  const plasticTrays = firstWeek.filter(c=>c.p.container==='Plastic cup').reduce((a,b)=>a+b.trays,0);
+  const openTrays    = firstWeek.filter(c=>c.p.container==='Open tray').reduce((a,b)=>a+b.trays,0);
+  const windowLabel  = windowVal>0 ? `Last ${numWeeks} weeks` : `All ${numWeeks} weeks`;
+  const CORD = ['Jiffy cup','Plastic cup','Open tray'];
+  const CLBL = {'Jiffy cup':'Jiffy Cups','Plastic cup':'Plastic Cups','Open tray':'Open Trays'};
+
+  let html = `
+    <div class="summary-bar">
+      <div class="stat"><div class="stat-val">${numWeeks}</div><div class="stat-lbl">${windowLabel} used</div></div>
+      <div class="stat"><div class="stat-val">${firstWeek.length}</div><div class="stat-lbl">Crops to grow</div></div>
+      <div class="stat"><div class="stat-val">${totalTrays}</div><div class="stat-lbl">Trays this Saturday</div></div>
+      <div class="stat"><div class="stat-val">${plantDate.toLocaleDateString('en-AU',{day:'numeric',month:'short'})}</div><div class="stat-lbl">Next plant date</div></div>
+    </div>
+    <div class="tray-summary">
+      <div class="tray-summary-card ts-jiffy"><div class="ts-num">${jiffyTrays}</div><div class="ts-lbl">Jiffy Cup Trays</div></div>
+      <div class="tray-summary-card ts-plastic"><div class="ts-num">${plasticTrays}</div><div class="ts-lbl">Plastic Cup Trays</div></div>
+      <div class="tray-summary-card ts-open"><div class="ts-num">${openTrays}</div><div class="ts-lbl">Open Tray Trays</div></div>
+    </div>
+    <div class="download-bar">
+      <button class="btn-download btn-pdf" onclick="downloadPDF()">📄 Download PDF</button>
+      <button class="btn-download btn-excel" onclick="downloadExcel()">📊 Download Excel</button>
+    </div>
+    <div class="results-header">
+      <h2>Saturday Planting Schedule</h2>
+      <div class="results-sub">Regression forecast · +30% spoilage buffer · 9-week plan</div>
+    </div>
+    <div class="schedule-grid">`;
+
+  schedule.forEach((week,i) => {
+    const total = week.crops.reduce((a,b)=>a+b.trays,0);
+    const dl = week.date.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+    const sorted = [...week.crops].sort((a,b) => {
+      const ai=CORD.indexOf(a.p.container), bi=CORD.indexOf(b.p.container);
+      return ai!==bi ? ai-bi : b.trays-a.trays;
+    });
+    html += `
+      <div class="week-card">
+        <div class="card-header">
+          <div class="card-header-left">
+            <div class="label">Plant on</div>
+            <div class="date">${dl}${i===0?'<span class="this-week-badge">THIS SATURDAY</span>':''}</div>
+          </div>
+          <div class="card-total">${total} trays</div>
+        </div>
+        <table class="crops">
+          <thead><tr><th>Crop</th><th>Container</th><th>Harvest Ready</th><th>Trays</th></tr></thead>
+          <tbody>`;
+    let lastCt = null;
+    sorted.forEach(c => {
+      const hl = c.harvestDate.toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'});
+      const dem = c.p.qtyType==='g' ? `${Math.round(c.weekDemand)}g/wk`
+        : c.p.qtyType==='Bunch'||c.p.qtyType==='Head' ? `${c.weekDemand.toFixed(1)} ${c.p.qtyType.toLowerCase()}s/wk`
+        : `${c.weekDemand.toFixed(3)}kg/wk`;
+      const ct = ctClass(c.p.container);
+      const note = c.trayLabel==='fixed'?'fixed':c.trayLabel==='manual'?'manual':'+30% buf';
+      if (c.p.container!==lastCt) {
+        lastCt=c.p.container;
+        html+=`<tr><td colspan="4" class="container-group-header ct-${ct}-header">${CLBL[c.p.container]}</td></tr>`;
+      }
+      html+=`
+        <tr class="ct-${ct}">
+          <td><div class="crop-name">${c.cropName}</div><div class="crop-detail">${dem} · ${c.p.weeks}wk</div></td>
+          <td><span class="tag tag-container">${c.p.container}</span></td>
+          <td><span class="tag tag-harvest">~${hl}</span></td>
+          <td><div class="tray-num">${c.trays}</div><div class="tray-sub">${note}</div></td>
+        </tr>`;
+    });
+    html+=`</tbody></table></div>`;
+  });
+  html+=`</div>`;
+
+  if (Object.keys(sourcedDemand).length>0) {
+    html+=`<div class="sourced-card"><h3>🛒 Sourced Ingredients to Order</h3><table class="sourced"><thead><tr><th>Ingredient</th><th>Avg Weekly Qty</th><th>Ratio</th></tr></thead><tbody>`;
+    Object.entries(sourcedDemand).forEach(([item,d]) => { html+=`<tr><td>${item}</td><td>${d.qty.toFixed(1)} units/wk</td><td>${d.note}</td></tr>`; });
+    html+=`</tbody></table></div>`;
+  }
+
+  window._scheduleData = { schedule, plantDate, jiffyTrays, plasticTrays, openTrays, numWeeks };
+  document.getElementById('main').innerHTML = html;
+}
+
+// ─── SETTINGS: SCHEDULE TAB ───────────────────────────────────────────────────
+async function renderScheduleSettings() {
+  const settings = await loadSettingsFromDB();
+  let html = '';
+  PRODUCE.forEach(p => {
+    const s = settings[p.crop] || {mode:'auto', trays:1};
+    const id = p.crop.replace(/[^a-z0-9]/gi,'_');
+    html += `
+      <div class="crop-setting-row ${s.mode==='off'?'disabled':''}" id="crow_${id}">
+        <div>
+          <div class="cs-name">${p.crop}</div>
+          <div class="cs-meta">${p.weeks}wk maturity · ${p.container} · ${p.per_tray}${p.qty_type}/tray</div>
+        </div>
+        <div class="cs-mode">
+          <select onchange="onModeChange('${p.crop.replace(/'/g,"\\'")}',this.value)">
+            <option value="auto"  ${s.mode==='auto' ?'selected':''}>Auto (from sales)</option>
+            <option value="fixed" ${s.mode==='fixed'?'selected':''}>Fixed trays</option>
+            <option value="off"   ${s.mode==='off'  ?'selected':''}>Off (excluded)</option>
+          </select>
+        </div>
+        <div class="cs-trays">
+          <input type="number" id="ct_${id}" value="${s.trays}" min="0" max="99"
+            ${s.mode==='auto'?'disabled':''}
+            onchange="onTrayChange('${p.crop.replace(/'/g,"\\'")}',this.value)">
+          <span class="cs-trays-label">trays</span>
+        </div>
+      </div>`;
+  });
+  document.getElementById('settingsCropList').innerHTML = html;
+}
+
+async function onModeChange(cropName, mode) {
+  const id = cropName.replace(/[^a-z0-9]/gi,'_');
+  const traysEl = document.getElementById(`ct_${id}`);
+  const trays = traysEl ? parseInt(traysEl.value)||1 : 1;
+  await saveSettingToDB(cropName, mode, trays);
+  renderScheduleSettings();
+}
+
+async function onTrayChange(cropName, val) {
+  const id = cropName.replace(/[^a-z0-9]/gi,'_');
+  const row = document.getElementById(`crow_${id}`);
+  const mode = row ? row.querySelector('select').value : 'fixed';
+  await saveSettingToDB(cropName, mode, parseInt(val)||0);
+}
+
+function confirmSave() {
+  const el = document.getElementById('saveConfirm');
+  el.style.display='inline';
+  setTimeout(()=>{ el.style.display='none'; }, 2500);
+}
+
+// ─── SETTINGS: CROPS TAB ──────────────────────────────────────────────────────
+function renderCropsTable() {
+  const tbody = document.getElementById('cropsTableBody');
+  if (!PRODUCE.length) { tbody.innerHTML='<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted)">No crops yet</td></tr>'; return; }
+  tbody.innerHTML = PRODUCE.map(p => `
+    <tr>
+      <td><strong>${p.crop}</strong></td>
+      <td><span class="tag tag-container">${p.qty_type}</span></td>
+      <td style="font-family:'DM Mono',monospace">${p.per_tray}</td>
+      <td style="font-family:'DM Mono',monospace">${p.weeks}wk</td>
+      <td><span class="tag tag-container">${p.container}</span></td>
+      <td><button class="btn-del" onclick="deleteCrop('${p.crop.replace(/'/g,"\\'")}')">Remove</button></td>
+    </tr>`).join('');
+}
+
+async function addCrop() {
+  const name      = document.getElementById('nc_name').value.trim();
+  const weeks     = parseInt(document.getElementById('nc_weeks').value);
+  const yieldVal  = parseFloat(document.getElementById('nc_yield').value);
+  const unit      = document.getElementById('nc_unit').value;
+  const container = document.getElementById('nc_container').value;
+  if (!name)              { showFormErr('cropError','Please enter a crop name.'); return; }
+  if (!weeks||weeks<1)    { showFormErr('cropError','Please enter valid maturity weeks.'); return; }
+  if (!yieldVal||yieldVal<=0){ showFormErr('cropError','Please enter a valid yield per tray.'); return; }
+  if (PM[name])           { showFormErr('cropError',`"${name}" already exists.`); return; }
+  try {
+    await sbFetch('crops','POST',[{ crop:name, qty_type:unit, per_tray:yieldVal, weeks, container }]);
+    await saveSettingToDB(name,'auto',1);
+    await loadCrops();
+    renderCropsTable();
+    renderScheduleSettings();
+    populateCropDropdown();
+    ['nc_name','nc_weeks','nc_yield'].forEach(id => document.getElementById(id).value='');
+    showFormErr('cropError','',true);
+  } catch(e) { showFormErr('cropError','Error saving: ' + e.message); }
+}
+
+async function deleteCrop(cropName) {
+  if (!confirm(`Remove "${cropName}"? This will also delete all its product mappings.`)) return;
+  try {
+    await sbFetch('product_map?crop_name=eq.'+encodeURIComponent(cropName),'DELETE');
+    await sbFetch('crops?crop=eq.'+encodeURIComponent(cropName),'DELETE');
+    await loadCrops(); await loadProductMap();
+    renderCropsTable(); renderProductMapTable(); renderScheduleSettings(); populateCropDropdown();
+  } catch(e) { alert('Error removing crop: '+e.message); }
+}
+
+// ─── SETTINGS: PRODUCT MAP TAB ────────────────────────────────────────────────
+function renderProductMapTable() {
+  const tbody = document.getElementById('productMapBody');
+  const entries = [];
+  Object.entries(PMAP).forEach(([prod, crops]) => {
+    Object.entries(crops).forEach(([crop, qty]) => entries.push({ prod, crop, qty }));
+  });
+  entries.sort((a,b)=>a.prod.localeCompare(b.prod));
+  if (!entries.length) { tbody.innerHTML='<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text-muted)">No mappings yet</td></tr>'; return; }
+  let lastProd=null;
+  tbody.innerHTML = entries.map(e => {
+    const showProd = e.prod!==lastProd; lastProd=e.prod;
+    return `<tr>
+      <td>${showProd?`<strong>${e.prod}</strong>`:''}</td>
+      <td style="color:var(--moss);font-family:'DM Mono',monospace">${e.crop}</td>
+      <td style="font-family:'DM Mono',monospace">${e.qty}</td>
+      <td><button class="btn-del" onclick="deleteMapping('${e.prod.replace(/'/g,"\\'")}','${e.crop.replace(/'/g,"\\'")}')">Remove</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function populateCropDropdown() {
+  document.getElementById('pm_crop').innerHTML = PRODUCE.map(p=>`<option value="${p.crop}">${p.crop}</option>`).join('');
+}
+
+async function addProductMapping() {
+  const product = document.getElementById('pm_product').value.trim();
+  const crop    = document.getElementById('pm_crop').value;
+  const qty     = parseFloat(document.getElementById('pm_qty').value);
+  if (!product)       { showFormErr('pmError','Please enter a product name.'); return; }
+  if (!qty||qty<=0)   { showFormErr('pmError','Please enter a valid quantity.'); return; }
+  try {
+    await sbFetch('product_map','POST',[{ product_name:product, crop_name:crop, qty_per_unit:qty }]);
+    await loadProductMap();
+    renderProductMapTable();
+    document.getElementById('pm_product').value='';
+    document.getElementById('pm_qty').value='';
+    showFormErr('pmError','',true);
+  } catch(e) { showFormErr('pmError','Error saving: '+e.message); }
+}
+
+async function deleteMapping(productName, cropName) {
+  try {
+    await sbFetch(`product_map?product_name=eq.${encodeURIComponent(productName)}&crop_name=eq.${encodeURIComponent(cropName)}`,'DELETE');
+    await loadProductMap();
+    renderProductMapTable();
+  } catch(e) { alert('Error removing mapping: '+e.message); }
+}
+
+// ─── PAGE & TAB NAVIGATION ────────────────────────────────────────────────────
+function showPage(page) {
+  document.getElementById('schedulePage').classList.toggle('active', page==='schedule');
+  document.getElementById('settingsPage').classList.toggle('active', page==='settings');
+  document.getElementById('btnSchedule').classList.toggle('active', page==='schedule');
+  document.getElementById('btnSettings').classList.toggle('active', page==='settings');
+  if (page==='settings') {
+    renderScheduleSettings();
+    renderCropsTable();
+    renderProductMapTable();
+    populateCropDropdown();
+  }
+}
+
+function showTab(tabId, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById(tabId).classList.add('active');
+  if(btn) btn.classList.add('active');
+}
+
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+function showBanner(type, msg) { const b=document.getElementById('banner'); b.className=`banner ${type}`; b.textContent=msg; }
+function hideBanner() { const b=document.getElementById('banner'); b.className='banner'; b.textContent=''; }
+function showFormErr(id, msg, hide=false) { const el=document.getElementById(id); el.textContent=msg; el.style.display=hide?'none':'block'; }
+
+// ─── EXPORT: EXCEL ────────────────────────────────────────────────────────────
+function downloadExcel() {
+  const d = window._scheduleData; if (!d) return;
+  const wb = XLSX.utils.book_new();
+  const CORD = ['Jiffy cup','Plastic cup','Open tray'];
+  d.schedule.forEach((week, wi) => {
+    const dateStr = week.date.toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'});
+    const sorted = [...week.crops].sort((a,b)=>{ const ai=CORD.indexOf(a.p.container),bi=CORD.indexOf(b.p.container); return ai!==bi?ai-bi:b.trays-a.trays; });
+    const rows = [
+      [`Fifth Harvest — Planting Schedule: ${dateStr}`],
+      [`Jiffy: ${d.jiffyTrays}`,`Plastic: ${d.plasticTrays}`,`Open: ${d.openTrays}`],
+      [],['Crop','Container','Trays','Harvest Ready','Mode','Demand/wk'],
+    ];
+    let lastCt=null;
+    sorted.forEach(c => {
+      if(c.p.container!==lastCt){lastCt=c.p.container;rows.push([`── ${c.p.container} ──`]);}
+      const hl=c.harvestDate.toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'});
+      const dem=c.p.qtyType==='g'?`${Math.round(c.weekDemand)}g/wk`:c.p.qtyType==='Bunch'||c.p.qtyType==='Head'?`${c.weekDemand.toFixed(1)} ${c.p.qtyType}s/wk`:`${c.weekDemand.toFixed(3)}kg/wk`;
+      rows.push([c.cropName,c.p.container,c.trays,hl,c.trayLabel||'auto',dem]);
+    });
+    const ws=XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols']=[{wch:28},{wch:14},{wch:8},{wch:16},{wch:10},{wch:14}];
+    XLSX.utils.book_append_sheet(wb,ws,wi===0?'This Saturday':`Week ${wi+1}`);
+  });
+  XLSX.writeFile(wb,`FH_Planting_Schedule_${d.plantDate.toISOString().split('T')[0]}.xlsx`);
+}
+
+// ─── EXPORT: PDF ──────────────────────────────────────────────────────────────
+function downloadPDF() {
+  const d = window._scheduleData; if (!d) return;
+  const {jsPDF} = window.jspdf;
+  const doc = new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+  const CORD=['Jiffy cup','Plastic cup','Open tray'];
+  const CT_C={'Jiffy cup':[232,245,224],'Plastic cup':[232,240,251],'Open tray':[253,245,224]};
+  const CT_H={'Jiffy cup':[90,154,64],'Plastic cup':[74,112,208],'Open tray':[208,160,48]};
+  d.schedule.forEach((week,wi) => {
+    if(wi>0) doc.addPage();
+    const dateStr=week.date.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+    doc.setFillColor(30,18,8); doc.rect(0,0,210,18,'F');
+    doc.setTextColor(245,240,228); doc.setFontSize(13); doc.setFont('helvetica','bold');
+    doc.text('Fifth Harvest — Planting Schedule',14,11);
+    doc.setFontSize(9); doc.setFont('helvetica','normal');
+    doc.text(wi===0?'THIS SATURDAY':`Week ${wi+1}`,196,11,{align:'right'});
+    doc.setTextColor(30,18,8); doc.setFontSize(11); doc.setFont('helvetica','bold');
+    doc.text(dateStr,14,26);
+    [{label:'Jiffy Cup',val:d.jiffyTrays,color:[232,245,224],tc:[45,90,32]},
+     {label:'Plastic Cup',val:d.plasticTrays,color:[232,240,251],tc:[26,58,122]},
+     {label:'Open Tray',val:d.openTrays,color:[253,245,224],tc:[122,90,16]}
+    ].forEach((b,i)=>{
+      const x=14+i*64;
+      doc.setFillColor(...b.color); doc.roundedRect(x,30,60,16,2,2,'F');
+      doc.setTextColor(...b.tc); doc.setFontSize(16); doc.setFont('helvetica','bold');
+      doc.text(String(b.val),x+30,40,{align:'center'});
+      doc.setFontSize(7); doc.setFont('helvetica','normal');
+      doc.text(b.label+' Trays',x+30,44,{align:'center'});
+    });
+    const sorted=[...week.crops].sort((a,b)=>{const ai=CORD.indexOf(a.p.container),bi=CORD.indexOf(b.p.container);return ai!==bi?ai-bi:b.trays-a.trays;});
+    const rows=[]; const styles=[]; let lastCt=null, rowIdx=0;
+    sorted.forEach(c=>{
+      if(c.p.container!==lastCt){
+        lastCt=c.p.container;
+        rows.push([{content:c.p.container,colSpan:5}]);
+        styles.push({row:rowIdx,fillColor:CT_H[c.p.container],textColor:[255,255,255],fontStyle:'bold',fontSize:8});
+        rowIdx++;
+      }
+      const hl=c.harvestDate.toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'});
+      const dem=c.p.qtyType==='g'?`${Math.round(c.weekDemand)}g`:c.p.qtyType==='Bunch'||c.p.qtyType==='Head'?`${c.weekDemand.toFixed(1)} ${c.p.qtyType}s`:`${c.weekDemand.toFixed(2)}kg`;
+      rows.push([c.cropName,c.p.container,c.trays,`~${hl}`,dem]);
+      styles.push({row:rowIdx,fillColor:CT_C[c.p.container]});
+      rowIdx++;
+    });
+    doc.autoTable({
+      startY:50,
+      head:[['Crop','Container','Trays','Harvest','Demand/wk']],
+      body:rows,theme:'plain',
+      headStyles:{fillColor:[30,18,8],textColor:[245,240,228],fontStyle:'bold',fontSize:8},
+      bodyStyles:{fontSize:8,cellPadding:2},
+      columnStyles:{2:{halign:'center',fontStyle:'bold'},3:{halign:'center'},4:{halign:'center'}},
+      didParseCell:(data)=>{
+        const s=styles.find(x=>x.row===data.row.index);
+        if(s&&data.section==='body'){
+          if(s.fillColor) data.cell.styles.fillColor=s.fillColor;
+          if(s.textColor) data.cell.styles.textColor=s.textColor;
+          if(s.fontStyle) data.cell.styles.fontStyle=s.fontStyle;
+          if(s.fontSize)  data.cell.styles.fontSize=s.fontSize;
+        }
+      },
+      margin:{left:14,right:14},
+    });
+    doc.setFontSize(7); doc.setTextColor(150,140,120);
+    doc.text(`Generated ${new Date().toLocaleDateString('en-AU')} · Regression forecast · +30% buffer`,14,290);
+    doc.text(`Page ${wi+1} of ${d.schedule.length}`,196,290,{align:'right'});
+  });
+  doc.save(`FH_Planting_Schedule_${d.plantDate.toISOString().split('T')[0]}.pdf`);
+}
+</script>
+</body>
+</html>
