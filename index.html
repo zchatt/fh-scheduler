@@ -523,20 +523,24 @@ function parseCSV(text, filename) {
 
   if (nameIdx !== -1 && qtyIdx !== -1 && dateIdx !== -1) {
     // ── Fresho multi-week export ──────────────────────────────────────────────
+    const qtTypeIdx = headers.findIndex(h => h === 'Qty Type');
     const byWeek = {};
     for (const line of lines.slice(1)) {
       if (!line.trim()) continue;
-      const c     = splitLine(line);
-      const name  = (c[nameIdx]||'').trim().replace(/^'|'$/g,'');
-      const qty   = parseFloat((c[qtyIdx]||'0').replace(/[^0-9.-]/g,'')) || 0;
-      const date  = (c[dateIdx]||'').trim().replace(/^"|"$/g,'');
-      const state = stateIdx !== -1 ? (c[stateIdx]||'').trim().toLowerCase() : '';
+      const c      = splitLine(line);
+      const name   = (c[nameIdx]||'').trim().replace(/^'|'$/g,'');
+      const qtType = qtTypeIdx !== -1 ? (c[qtTypeIdx]||'').trim().replace(/^'|'$/g,'') : '';
+      // Store as "Product Name QtyType" e.g. "Basil Bunch" to match product_map keys
+      const key    = qtType ? `${name} ${qtType}` : name;
+      const qty    = parseFloat((c[qtyIdx]||'0').replace(/[^0-9.-]/g,'')) || 0;
+      const date   = (c[dateIdx]||'').trim().replace(/^"|"$/g,'');
+      const state  = stateIdx !== -1 ? (c[stateIdx]||'').trim().toLowerCase() : '';
       if (!name || qty <= 0 || !date) continue;
       if (state === 'cancelled' || state === 'void') continue;
 
       const isoKey = dateToISOWeek(date);
       if (!byWeek[isoKey]) byWeek[isoKey] = { sums: {}, dates: [] };
-      byWeek[isoKey].sums[name] = (byWeek[isoKey].sums[name] || 0) + qty;
+      byWeek[isoKey].sums[key] = (byWeek[isoKey].sums[key] || 0) + qty;
       if (!byWeek[isoKey].dates.includes(date)) byWeek[isoKey].dates.push(date);
     }
     return Object.entries(byWeek)
@@ -544,7 +548,7 @@ function parseCSV(text, filename) {
       .map(([isoKey, {sums, dates}]) => ({
         key:     isoKey,
         label:   isoWeekLabel(isoKey),
-        rows:    Object.entries(sums).map(([Product, Quantity]) => ({ Product, Quantity })),
+        rows:    Object.entries(sums).map(([Product, Quantity]) => ({ Product, Quantity: Math.round(Quantity * 1000) / 1000 })),
         addedAt: Date.now(),
       }));
   }
