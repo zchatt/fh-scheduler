@@ -477,45 +477,112 @@ async function handleFiles(files) {
   if (!tasks.length) { showBanner('error','No CSV files found.'); return; }
   showBanner('info', `⏳ Reading ${tasks.length} file(s)…`);
 
-  const parsed = await Promise.all(tasks.map(file => new Promise(resolve => {
+  const allWeeks = [];
+  await Promise.all(tasks.map(file => new Promise(resolve => {
     const reader = new FileReader();
     reader.onload = e => {
-      const rows = parseCSV(e.target.result);
-      const match = file.name.match(/(\d{4}-\d{2}-\d{2})_to_(\d{4}-\d{2}-\d{2})/);
-      const label = match ? `${match[1]} → ${match[2]}` : file.name.replace('.csv','').substring(0,35);
-      const key   = match ? `${match[1]}_${match[2]}` : file.name;
-      resolve({ key, label, rows, addedAt: Date.now() });
+      const weekBlocks = parseCSV(e.target.result, file.name);
+      allWeeks.push(...weekBlocks);
+      resolve();
     };
     reader.readAsText(file);
   })));
 
-  showBanner('info', '⏳ Saving to shared database…');
-  const existing = await loadStored();
-  const existingKeys = new Set(existing.map(w => w.id));
-  let added = 0, skipped = 0;
-  const toSave = parsed.filter(w => { if (existingKeys.has(w.key)) { skipped++; return false; } added++; return true; });
-  if (toSave.length > 0) await saveManyWeeks(toSave);
-  await renderSidebar();
-  document.getElementById('fileInput').value = '';
-  const total = (await loadStored()).length;
-  if (added > 0 && skipped === 0) showBanner('info', `✓ ${added} week(s) saved — ${total} total`);
-  else if (added > 0) showBanner('info', `✓ ${added} new, ${skipped} already stored`);
-  else showBanner('error', `${skipped} week(s) already stored — no duplicates added`);
+  if (!allWeeks.length) { showBanner('error', '⚠️ No valid sales data found. Check the CSV format.'); return; }
+
+  showBanner('info', `⏳ Saving ${allWeeks.length} week(s) to database…`);
+  try {
+    const existing = await loadStored();
+    const existingKeys = new Set(existing.map(w => w.id));
+    let added = 0, skipped = 0;
+    const toSave = allWeeks.filter(w => { if (existingKeys.has(w.key)) { skipped++; return false; } added++; return true; });
+    if (toSave.length > 0) await saveManyWeeks(toSave);
+    await renderSidebar();
+    document.getElementById('fileInput').value = '';
+    const total = (await loadStored()).length;
+    if (added > 0 && skipped === 0) showBanner('info', `✓ ${added} week(s) saved — ${total} total`);
+    else if (added > 0) showBanner('info', `✓ ${added} new, ${skipped} already stored — ${total} total`);
+    else showBanner('error', `All ${skipped} week(s) already stored — nothing new added`);
+  } catch(e) {
+    showBanner('error', `⚠️ Save failed: ${e.message}`);
+  }
 }
 
-function parseCSV(text) {
+// Returns an array of week objects: [{ key, label, rows:[{Product,Quantity}], addedAt }]
+// Handles both Fresho multi-week exports (has "Delivery Date" column) and legacy single-week CSVs.
+function parseCSV(text, filename) {
   const lines = text.trim().split('\n');
   if (!lines.length) return [];
-  const headers = splitLine(lines[0]).map(h => h.trim().replace(/^"|"$/g,''));
-  const pi = headers.findIndex(h => h.toLowerCase().includes('product'));
-  const qi = headers.findIndex(h => /^quantity/i.test(h) || h.toLowerCase()==='qty');
-  if (pi===-1 || qi===-1) return [];
-  return lines.slice(1).map(l => {
-    const c = splitLine(l);
-    const prod = (c[pi]||'').trim().replace(/^"|"$/g,'');
-    const qty  = parseFloat((c[qi]||'0').replace(/[^0-9.-]/g,'')) || 0;
+  const headers = splitLine(lines[0]).map(h => h.trim().replace(/^"|"$/g,'').replace(/^﻿/,''));
+
+  // Fresho format detection: must have Product Name, Quantity, and Delivery Date
+  const nameIdx  = headers.findIndex(h => h === 'Product Name');
+  const qtyIdx   = headers.findIndex(h => h === 'Quantity');
+  const dateIdx  = headers.findIndex(h => h === 'Delivery Date');
+  const stateIdx = headers.findIndex(h => h === 'Order State');
+
+  if (nameIdx !== -1 && qtyIdx !== -1 && dateIdx !== -1) {
+    // ── Fresho multi-week export ──────────────────────────────────────────────
+    const byWeek = {};
+    for (const line of lines.slice(1)) {
+      if (!line.trim()) continue;
+      const c     = splitLine(line);
+      const name  = (c[nameIdx]||'').trim().replace(/^'|'$/g,'');
+      const qty   = parseFloat((c[qtyIdx]||'0').replace(/[^0-9.-]/g,'')) || 0;
+      const date  = (c[dateIdx]||'').trim().replace(/^"|"$/g,'');
+      const state = stateIdx !== -1 ? (c[stateIdx]||'').trim().toLowerCase() : '';
+      if (!name || qty <= 0 || !date) continue;
+      if (state === 'cancelled' || state === 'void') continue;
+
+      const isoKey = dateToISOWeek(date);
+      if (!byWeek[isoKey]) byWeek[isoKey] = { sums: {}, dates: [] };
+      byWeek[isoKey].sums[name] = (byWeek[isoKey].sums[name] || 0) + qty;
+      if (!byWeek[isoKey].dates.includes(date)) byWeek[isoKey].dates.push(date);
+    }
+    return Object.entries(byWeek)
+      .sort(([a],[b]) => a.localeCompare(b))
+      .map(([isoKey, {sums, dates}]) => ({
+        key:     isoKey,
+        label:   isoWeekLabel(isoKey),
+        rows:    Object.entries(sums).map(([Product, Quantity]) => ({ Product, Quantity })),
+        addedAt: Date.now(),
+      }));
+  }
+
+  // ── Legacy single-week format (Product, Quantity columns) ──────────────────
+  const legacyNameIdx = headers.findIndex(h => h.toLowerCase() === 'product' || h.toLowerCase() === 'product name');
+  const legacyQtyIdx  = headers.findIndex(h => /^quantity$/i.test(h) || /^qty$/i.test(h));
+  if (legacyNameIdx === -1 || legacyQtyIdx === -1) return [];
+  const match = (filename||'').match(/(\d{4}-\d{2}-\d{2})_to_(\d{4}-\d{2}-\d{2})/);
+  const key   = match ? `${match[1]}_${match[2]}` : (filename||'week').replace('.csv','').substring(0,40);
+  const label = match ? `${match[1]} → ${match[2]}` : key;
+  const rows  = lines.slice(1).map(l => {
+    const c    = splitLine(l);
+    const prod = (c[legacyNameIdx]||'').trim().replace(/^"|"$/g,'');
+    const qty  = parseFloat((c[legacyQtyIdx]||'0').replace(/[^0-9.-]/g,'')) || 0;
     return { Product:prod, Quantity:qty };
   }).filter(r => r.Product && r.Quantity > 0);
+  return [{ key, label, rows, addedAt: Date.now() }];
+}
+
+function dateToISOWeek(dateStr) {
+  const d = new Date(dateStr);
+  d.setHours(0,0,0,0);
+  d.setDate(d.getDate() + 3 - (d.getDay()+6)%7);
+  const y = d.getFullYear();
+  const w1 = new Date(y, 0, 4);
+  const wn = 1 + Math.round(((d - w1) / 86400000 - 3 + (w1.getDay()+6)%7) / 7);
+  return `${y}-W${String(wn).padStart(2,'0')}`;
+}
+
+function isoWeekLabel(isoKey) {
+  const [y, w] = isoKey.split('-W').map(Number);
+  const jan4   = new Date(y, 0, 4);
+  const mon    = new Date(jan4);
+  mon.setDate(jan4.getDate() - ((jan4.getDay()+6)%7) + (w-1)*7);
+  const sun = new Date(mon); sun.setDate(mon.getDate()+6);
+  const fmt = d => d.toLocaleDateString('en-AU',{day:'numeric',month:'short'});
+  return `${fmt(mon)} – ${fmt(sun)}`;
 }
 
 function splitLine(line) {
